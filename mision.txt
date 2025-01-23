@@ -1,0 +1,1755 @@
+
+// Mission Plan Description and Console Setup
+
+// This Mission Plan demonstrates how FreeFlyer can be used to dynamically create a 
+// constellation of spacecraft and subsequently perform coverage analyses using the 
+// created constellation.
+
+// The constellation is built by the user selecting custom orbital elements, a 
+// pre-built constellation, or by inputting a TLE set. 
+
+// Once the constellation, or "Formation", has been created, it is visualized 
+// in 2D and 3D ViewWindows and propagated for a user specified number of days.
+
+// During the propagation period, a coverage analysis is conducted. This analysis 
+// makes use of the PointGroup object's built-in Coverage method. Depending on how 
+// many times a point has been seen, it will be color-coded accordingly. For 
+// constellations smaller than 100 satellites, chain contact analysis is also performed
+// by default. The user can choose to enable this feature for larger constellations.
+// This analysis examines contact between two ground stations and spacecraft overhead. 
+// The contact is shown using vectors, logged in an output file, and the aggregated 
+// contact data is reported to the console.
+
+
+// Set up Console
+
+Console.DockMode = 3;
+Console.Dimension = 50;
+Console.BackColor = ColorTools.Black;
+Console.CurrentTextColor = ColorTools.Yellow;
+Console.WordWrap = 1;
+Console.UseFixedWidthFont = 0;
+Console.WindowTitle = "Status Console";
+Console.Show();
+
+Report "This Mission Plan demonstrates how FreeFlyer can be used to dynamically create a constellation of spacecraft and subsequently perform coverage analyses using " +
+		"the created constellation." to Console;
+Report "" to Console;
+
+Report "The constellation is built by the user selecting custom orbital elements, a pre-built constellation, or by inputting a TLE set. " to Console;
+Report "" to Console;
+
+Report @"Once the constellation, or \"Formation\", has been created, it is visualized in 2D and 3D ViewWindow objects and propagated for a user-specified number of days." to Console;
+Report "" to Console;
+
+Report "During the propagation period, a coverage analysis is conducted. This analysis makes use of the PointGroup object's built-in Coverage method. Depending on how many " + 
+		"times a point has been seen, it will be color-coded accordingly. For constellations smaller than 100 satellites, chain contact analysis is also performed by default. " +
+		"The user can choose to enable this feature for larger constellations. This analysis examines contact between two ground stations and spacecraft in the formation. " +
+		"The contact is shown using vectors, logged in an output file, and the aggregated contact data is reported to the console." to Console;
+Report "" to Console;
+
+Console.CurrentTextColor = ColorTools.Lime;
+
+
+// Define Structs and Create Objects
+
+Struct StationData;
+	Variable lat;
+	Variable long;
+	String   name;
+End;
+
+Variable analysisDuration;
+Variable antenna;
+Variable antennaLocationIndex;
+Variable centerLat;
+Variable centerLong;
+Variable chainSummaryTime;
+Variable color;       		   // Used to define the point revisit legend
+Variable count;       		   // Used to define the point revisit legend
+Variable ecc;		  		   // Eccentricity 
+Variable enableContact;
+Variable height;      		   // Used to define overlay shapes
+Variable i;
+Variable inc;         		   // Inclination
+Variable incrRAAN;    		   // RAAN increment
+Variable incrMA;      		   // MA increment
+Variable j;
+Variable nPlanes;     		   // Number of orbital planes
+Variable nSC;         		   // Number of spacecraft
+Variable nSCsPerPlane;
+Variable scaleFactor; 		   // A factor used to setup the point coverage recoloring
+Variable sma;		  		   // Semi-major axis
+Variable stepCount = 0;
+Variable terminal;
+Variable terminalLocationIndex;
+Variable totalAoS;
+Variable totalLoS;
+Variable viewAsGroup;
+Variable w; 				   // Argument of periapsis
+Variable width;				   // Used to define overlay shapes
+
+String analysisStartEpochString;
+String constName;   		   // Constellation name
+String chainSummaryTimeString;
+
+UserInterface constellationUI;
+FileInterface fi;
+
+Formation     const;    	   // Constellation
+GroundStation gsAntenna;
+GroundStation gsTerminal;
+
+List<Vector>               lvecAntennaToSC;      // List of vectors between GroundStation and Spacecraft
+List<Vector>               lvecSCToTerminal;     // List of vectors between Spacecraft and GroundStation
+List<VisibilityCalculator> lvcContactEvaluators;
+List<Array>                lCoverage;
+List<Array>                lEventTypes;
+List<StationData>          allStationData;
+List<TimeSpanArray>        lEventTimes;
+
+allStationData.Count = 8;
+
+Array totalNumberOfRevisits[0];
+Array pointHasBeenCovered[0];
+Array aNumEvents[0];
+
+//Block Build Station Data List
+allStationData[0].lat  = 38.9685;
+allStationData[0].long = -76.8620;
+allStationData[0].name = "Lanham, MD";
+
+allStationData[1].lat  = 34.0522;
+allStationData[1].long = -118.2437;
+allStationData[1].name = "Los Angeles, CA";
+
+allStationData[2].lat  = 47.6062;
+allStationData[2].long = -122.3321;
+allStationData[2].name = "Seattle, WA";
+
+allStationData[3].lat  = 64.8378;
+allStationData[3].long = -114.7164;
+allStationData[3].name = "Fairbanks, AK";
+
+allStationData[4].lat  = 37.7749;
+allStationData[4].long = -122.4194;
+allStationData[4].name = "San Francisco, CA";
+
+allStationData[5].lat  = 21.3069;
+allStationData[5].long = -157.8583;
+allStationData[5].name = "Honolulu, HI";
+
+allStationData[6].lat  = 74.6973; 
+allStationData[6].long = -94.8297;
+allStationData[6].name = "Resolute, Canada";
+
+allStationData[7].lat  = 77.8750; 
+allStationData[7].long = -20.9752;
+allStationData[7].name = "Svalbard, Norway";
+//EndBlock
+
+
+// Define Procedures
+
+Define Procedure RunWizardUserInterface(UserInterface ui, Formation constellation, Variable constType, Variable viewAsGroup, Variable regionType, Variable gs1, Variable gs2, String startingEpoch, Variable duration, Variable nPlanes, Variable nSCsPerPlane, Variable inc, Variable sma, Variable ecc, Variable w, String pathToTLE, Variable enableContact);
+	
+	// Procedure that sets up the dynamic user interface.
+	
+	//Block Object Definition
+	Variable id1; // UserInterface MultiChoice Identifier
+	Variable id2; // UserInterface MultiChoice Identifier 
+	//EndBlock
+	
+	// This is where we construct the dynamic page to define the constellations for  
+	// the UserInterface based on the user's constellation selection. 
+	
+	//Block constellation Definition Page
+	ui.Title = "Constellation Definition";
+	Switch (constType);
+		Case 0:
+			
+			// Walker constellation
+			ui.AddPage("Walker Constellation Setup");
+			ui.AddSeparator("Definition of Constellation", 1);
+			ui.AddTextEntry("nPlanes", "Number of Orbital Planes: ", "5", 0, 0, 0, "%u", "");
+			ui.AddTextEntry("nSCsPerPlane", "Number of Spacecraft per Plane: ", "12", 0, 0, 0, "%u", "");
+			ui.AddSeparator("Orbital Elements of the Constellation", 1);
+			ui.AddTextEntry("inc", "Inclination of Orbit Planes: ", "60", 1, -360, 360, "% .1f", "deg");			
+			ui.AddTextEntry("sma", "Semi-Major Axis of Orbits: ", "7300", 1, 6378, 1e10, "% .1f", "km");
+			ui.AddTextEntry("ecc", "Eccentricity of Orbits: ","0.0000001", 1, 0, 1, "", "");
+			ui.AddTextEntry("w", "Argument of Perigee: ","270", 1, -360, 360, "% .1f", "deg");
+			
+			ui.AddPage("Analysis and Visualization Options");
+			ui.AddSeparator("Analysis Options", 1);
+			ui.AddTextEntry("startingEpoch", "Enter the analysis start epoch: ", startingEpoch, 0,"0");
+			ui.AddTextEntry("duration", "Enter the analysis duration: ", "0.5", 0, 0, 0, "% .3f", "days");
+			ui.AddBooleanChoice("enableContact", "Perform contact analysis? ", "Yes","No","Yes");
+			ui.AddLabel("Contact analysis shows when a spacecraft connects with two ground stations. Performing this analysis is not recommended for constellations over 100 satellites.");
+			
+			// Add the Ground Stations UserInterface page for Global Region
+			// Only show page if region is Global
+			If (regionType == 3);
+				
+				ui.AddLabel("If performing contact analysis, choose two separate ground station locations.");
+				id1 = ui.AddMultiChoice("gs1", "Ground Station 1: ", "0", 0);
+					 ui.AddMultiChoiceItem(id1, "0", "Lanham, MD");
+					 ui.AddMultiChoiceItem(id1, "1", "Los Angeles, CA");
+					 ui.AddMultiChoiceItem(id1, "2", "Seattle, WA");
+					 ui.AddMultiChoiceItem(id1, "3", "Fairbanks, AK");
+					 ui.AddMultiChoiceItem(id1, "4", "San Francisco, CA");
+					 ui.AddMultiChoiceItem(id1, "5", "Honolulu, HI");
+					 ui.AddMultiChoiceItem(id1, "6", "Resolute, Canada");
+					 ui.AddMultiChoiceItem(id1, "7", "Svalbard, Norway");
+				
+				id2 = ui.AddMultiChoice("gs2", "Ground Station 2: ", "6", 0);
+					 ui.AddMultiChoiceItem(id2, "0", "Lanham, MD");
+					 ui.AddMultiChoiceItem(id2, "1", "Los Angeles, CA");
+					 ui.AddMultiChoiceItem(id2, "2", "Seattle, WA");
+					 ui.AddMultiChoiceItem(id2, "3", "Fairbanks, AK");
+					 ui.AddMultiChoiceItem(id2, "4", "San Francisco, CA");
+					 ui.AddMultiChoiceItem(id2, "5", "Honolulu, HI");
+					 ui.AddMultiChoiceItem(id2, "6", "Resolute, Canada");
+					 ui.AddMultiChoiceItem(id2, "7", "Svalbard, Norway");
+			End;
+			
+			ui.AddSeparator("Visualization Options: ", 1);	
+			ui.AddBooleanChoice("viewAsGroup", "View spacecraft as group? ", "Yes", "No", "No");
+			ui.AddLabel("View as group is recommended for constellations larger than 100 satellites to improve visualization speed.");
+			
+			Break;
+			
+		Case 1:
+			
+			// Iridium NEXT constellation
+			ui.AddPage("Analysis and Visualization Options");
+			ui.AddSeparator("Analysis Options", 1);
+			ui.AddTextEntry("startingEpoch", "Enter the analysis start epoch: ", startingEpoch, 0,"0");
+			ui.AddTextEntry("duration", "Enter the analysis duration: ", "0.5", 0, 0, 0, "% .3f", "days");
+			ui.AddBooleanChoice("enableContact", "Perform contact analysis? ", "Yes","No","Yes");
+			ui.AddLabel("Contact analysis shows when a spacecraft connects with two ground stations. Performing this analysis is not recommended for constellations over 100 satellites.");
+			
+			// Add the Ground Stations UserInterface page for Global Region
+			// Only show page if region is Global
+			If (regionType == 3);
+				
+				ui.AddLabel("If performing contact analysis, choose two separate ground station locations.");
+				id1 = ui.AddMultiChoice("gs1", "Ground Station 1: ", "0", 0);
+					 ui.AddMultiChoiceItem(id1, "0", "Lanham, MD");
+					 ui.AddMultiChoiceItem(id1, "1", "Los Angeles, CA");
+					 ui.AddMultiChoiceItem(id1, "2", "Seattle, WA");
+					 ui.AddMultiChoiceItem(id1, "3", "Fairbanks, AK");
+					 ui.AddMultiChoiceItem(id1, "4", "San Francisco, CA");
+					 ui.AddMultiChoiceItem(id1, "5", "Honolulu, HI");
+					 ui.AddMultiChoiceItem(id1, "6", "Resolute, Canada");
+					 ui.AddMultiChoiceItem(id1, "7", "Svalbard, Norway");
+				
+				id2 = ui.AddMultiChoice("gs2", "Ground Station 2: ", "6", 0);
+					 ui.AddMultiChoiceItem(id2, "0", "Lanham, MD");
+					 ui.AddMultiChoiceItem(id2, "1", "Los Angeles, CA");
+					 ui.AddMultiChoiceItem(id2, "2", "Seattle, WA");
+					 ui.AddMultiChoiceItem(id2, "3", "Fairbanks, AK");
+					 ui.AddMultiChoiceItem(id2, "4", "San Francisco, CA");
+					 ui.AddMultiChoiceItem(id2, "5", "Honolulu, HI");
+					 ui.AddMultiChoiceItem(id2, "6", "Resolute, Canada");
+					 ui.AddMultiChoiceItem(id2, "7", "Svalbard, Norway");
+			End;
+			
+			ui.AddSeparator("Visualization Options: ", 1);
+			ui.AddBooleanChoice("viewAsGroup", "View spacecraft as group? ", "Yes", "No", "No");
+			ui.AddLabel("View as group is recommended for constellations larger than 100 satellites to improve visualization speed.");
+			
+			Break;
+			
+		Case 2:
+			
+			// PlanetLabs constellation
+			ui.AddPage("Analysis and Visualization Options");
+			ui.AddSeparator("Analysis Options", 1);
+			ui.AddTextEntry("startingEpoch", "Enter the analysis start epoch: ", startingEpoch, 0,"0");
+			ui.AddTextEntry("duration", "Enter the analysis duration: ", "1", 0, 0, 0, "% .3f", "days");
+			ui.AddBooleanChoice("enableContact", "Perform contact analysis? ", "Yes","No","No");
+			ui.AddLabel("Contact analysis shows when a spacecraft connects with two ground stations. Performing this analysis is not recommended for constellations over 100 satellites.");
+			
+			// Add the Ground Stations UserInterface page for Global Region
+			// Only show page if region is Global
+			If (regionType == 3);
+				
+				ui.AddLabel("If performing contact analysis, choose two separate ground station locations.");
+				id1 = ui.AddMultiChoice("gs1", "Ground Station 1: ", "0", 0);
+					 ui.AddMultiChoiceItem(id1, "0", "Lanham, MD");
+					 ui.AddMultiChoiceItem(id1, "1", "Los Angeles, CA");
+					 ui.AddMultiChoiceItem(id1, "2", "Seattle, WA");
+					 ui.AddMultiChoiceItem(id1, "3", "Fairbanks, AK");
+					 ui.AddMultiChoiceItem(id1, "4", "San Francisco, CA");
+					 ui.AddMultiChoiceItem(id1, "5", "Honolulu, HI");
+					 ui.AddMultiChoiceItem(id1, "6", "Resolute, Canada");
+					 ui.AddMultiChoiceItem(id1, "7", "Svalbard, Norway");
+				
+				id2 = ui.AddMultiChoice("gs2", "Ground Station 2: ", "6", 0);
+					 ui.AddMultiChoiceItem(id2, "0", "Lanham, MD");
+					 ui.AddMultiChoiceItem(id2, "1", "Los Angeles, CA");
+					 ui.AddMultiChoiceItem(id2, "2", "Seattle, WA");
+					 ui.AddMultiChoiceItem(id2, "3", "Fairbanks, AK");
+					 ui.AddMultiChoiceItem(id2, "4", "San Francisco, CA");
+					 ui.AddMultiChoiceItem(id2, "5", "Honolulu, HI");
+					 ui.AddMultiChoiceItem(id2, "6", "Resolute, Canada");
+					 ui.AddMultiChoiceItem(id2, "7", "Svalbard, Norway");
+			End;
+			
+			ui.AddSeparator("Visualization Options: ", 1);
+			ui.AddBooleanChoice("viewAsGroup", "View spacecraft as group? ", "Yes", "No", "Yes");
+			ui.AddLabel("View as group is recommended for constellations larger than 100 satellites to improve visualization speed.");
+			
+			Break;
+			
+		Case 3:
+			
+			// Kepler constellation
+			ui.AddPage("Analysis and Visualization Options");
+			ui.AddSeparator("Analysis Options", 1);
+			ui.AddTextEntry("startingEpoch", "Enter the analysis start epoch: ", startingEpoch, 0,"0");
+			ui.AddTextEntry("duration", "Enter the analysis duration: ", "0.5", 0, 0, 0, "% .3f", "days");
+			ui.AddBooleanChoice("enableContact", "Perform contact analysis? ", "Yes","No","No");
+			ui.AddLabel("Contact analysis shows when a spacecraft connects with two ground stations. Performing this analysis is not recommended for constellations over 100 satellites.");
+			
+			// Add the Ground Stations UserInterface page for Global Region
+			// Only show page if region is Global
+			If (regionType == 3);
+				
+				ui.AddLabel("If performing contact analysis, choose two separate ground station locations.");
+				id1 = ui.AddMultiChoice("gs1", "Ground Station 1: ", "0", 0);
+					 ui.AddMultiChoiceItem(id1, "0", "Lanham, MD");
+					 ui.AddMultiChoiceItem(id1, "1", "Los Angeles, CA");
+					 ui.AddMultiChoiceItem(id1, "2", "Seattle, WA");
+					 ui.AddMultiChoiceItem(id1, "3", "Fairbanks, AK");
+					 ui.AddMultiChoiceItem(id1, "4", "San Francisco, CA");
+					 ui.AddMultiChoiceItem(id1, "5", "Honolulu, HI");
+					 ui.AddMultiChoiceItem(id1, "6", "Resolute, Canada");
+					 ui.AddMultiChoiceItem(id1, "7", "Svalbard, Norway");
+				
+				id2 = ui.AddMultiChoice("gs2", "Ground Station 2: ", "6", 0);
+					 ui.AddMultiChoiceItem(id2, "0", "Lanham, MD");
+					 ui.AddMultiChoiceItem(id2, "1", "Los Angeles, CA");
+					 ui.AddMultiChoiceItem(id2, "2", "Seattle, WA");
+					 ui.AddMultiChoiceItem(id2, "3", "Fairbanks, AK");
+					 ui.AddMultiChoiceItem(id2, "4", "San Francisco, CA");
+					 ui.AddMultiChoiceItem(id2, "5", "Honolulu, HI");
+					 ui.AddMultiChoiceItem(id2, "6", "Resolute, Canada");
+					 ui.AddMultiChoiceItem(id2, "7", "Svalbard, Norway");
+			End;
+			
+			ui.AddSeparator("Visualization Options: ", 1);
+			ui.AddBooleanChoice("viewAsGroup", "View spacecraft as group? ", "Yes", "No", "Yes");
+			ui.AddLabel("View as group is recommended for constellations larger than 100 satellites to improve visualization speed.");
+			
+			Break;
+			
+		Case 4:
+			
+			// Starlink constellation
+			ui.AddPage("Analysis and Visualization Options");
+			ui.AddSeparator("Analysis Options", 1);
+			ui.AddTextEntry("startingEpoch", "Enter the analysis start epoch: ", startingEpoch, 0,"0");
+			ui.AddTextEntry("duration", "Enter the analysis duration: ", "0.125", 0, 0, 0, "% .3f", "days");
+			ui.AddBooleanChoice("enableContact", "Perform contact analysis? ", "Yes","No","No");
+			ui.AddLabel("Contact analysis shows when a spacecraft connects with two ground stations. Performing this analysis is not recommended for constellations over 100 satellites.");
+			
+			// Add the Ground Stations UserInterface page for Global Region
+			// Only show page if region is Global
+			If (regionType == 3);
+				
+				ui.AddLabel("If performing contact analysis, choose two separate ground station locations.");
+				id1 = ui.AddMultiChoice("gs1", "Ground Station 1: ", "0", 0);
+					 ui.AddMultiChoiceItem(id1, "0", "Lanham, MD");
+					 ui.AddMultiChoiceItem(id1, "1", "Los Angeles, CA");
+					 ui.AddMultiChoiceItem(id1, "2", "Seattle, WA");
+					 ui.AddMultiChoiceItem(id1, "3", "Fairbanks, AK");
+					 ui.AddMultiChoiceItem(id1, "4", "San Francisco, CA");
+					 ui.AddMultiChoiceItem(id1, "5", "Honolulu, HI");
+					 ui.AddMultiChoiceItem(id1, "6", "Resolute, Canada");
+					 ui.AddMultiChoiceItem(id1, "7", "Svalbard, Norway");
+				
+				id2 = ui.AddMultiChoice("gs2", "Ground Station 2: ", "6", 0);
+					 ui.AddMultiChoiceItem(id2, "0", "Lanham, MD");
+					 ui.AddMultiChoiceItem(id2, "1", "Los Angeles, CA");
+					 ui.AddMultiChoiceItem(id2, "2", "Seattle, WA");
+					 ui.AddMultiChoiceItem(id2, "3", "Fairbanks, AK");
+					 ui.AddMultiChoiceItem(id2, "4", "San Francisco, CA");
+					 ui.AddMultiChoiceItem(id2, "5", "Honolulu, HI");
+					 ui.AddMultiChoiceItem(id2, "6", "Resolute, Canada");
+					 ui.AddMultiChoiceItem(id2, "7", "Svalbard, Norway");
+			End;
+			
+			ui.AddSeparator("Visualization Options: ", 1);
+			ui.AddBooleanChoice("viewAsGroup", "View spacecraft as group? ", "Yes", "No", "Yes");
+			ui.AddLabel("View as group is recommended for constellations larger than 100 satellites to improve visualization speed.");
+			
+			Break;			
+			
+		Case 5: 
+			
+			// Custom TLE
+			ui.AddPage("Analysis and Visualization Options");
+			ui.AddSeparator("Analysis Options", 1);
+			ui.AddTextEntry("startingEpoch", "Enter the analysis start epoch: ", startingEpoch, 0,"0");
+			
+			If (constellation.Count > 1000);
+				
+				ui.AddTextEntry("duration", "Enter the analysis duration: ", "0.25", 0, 0, 0, "% .3f", "days");
+			Else;
+				
+				ui.AddTextEntry("duration", "Enter the analysis duration: ", "0.5", 0, 0, 0, "% .3f", "days");
+			End;
+			
+			If (constellation.Count > 100);
+				ui.AddBooleanChoice("enableContact", "Perform contact analysis? ", "Yes","No","No");
+			Else;
+				
+				ui.AddBooleanChoice("enableContact", "Perform contact analysis? ", "Yes","No","Yes");
+			End;
+			
+			ui.AddLabel("Contact analysis shows when a spacecraft connects with two ground stations. Performing this analysis is not recommended for constellations over 100 satellites.");
+			
+			// Add the Ground Stations UserInterface page for Global Region
+			// Only show page if region is Global
+			If (regionType == 3);
+				
+				ui.AddLabel("If performing contact analysis, choose two separate ground station locations.");
+				id1 = ui.AddMultiChoice("gs1", "Ground Station 1: ", "0", 0);
+					 ui.AddMultiChoiceItem(id1, "0", "Lanham, MD");
+					 ui.AddMultiChoiceItem(id1, "1", "Los Angeles, CA");
+					 ui.AddMultiChoiceItem(id1, "2", "Seattle, WA");
+					 ui.AddMultiChoiceItem(id1, "3", "Fairbanks, AK");
+					 ui.AddMultiChoiceItem(id1, "4", "San Francisco, CA");
+					 ui.AddMultiChoiceItem(id1, "5", "Honolulu, HI");
+					 ui.AddMultiChoiceItem(id1, "6", "Resolute, Canada");
+					 ui.AddMultiChoiceItem(id1, "7", "Svalbard, Norway");
+				
+				id2 = ui.AddMultiChoice("gs2", "Ground Station 2: ", "6", 0);
+					 ui.AddMultiChoiceItem(id2, "0", "Lanham, MD");
+					 ui.AddMultiChoiceItem(id2, "1", "Los Angeles, CA");
+					 ui.AddMultiChoiceItem(id2, "2", "Seattle, WA");
+					 ui.AddMultiChoiceItem(id2, "3", "Fairbanks, AK");
+					 ui.AddMultiChoiceItem(id2, "4", "San Francisco, CA");
+					 ui.AddMultiChoiceItem(id2, "5", "Honolulu, HI");
+					 ui.AddMultiChoiceItem(id2, "6", "Resolute, Canada");
+					 ui.AddMultiChoiceItem(id2, "7", "Svalbard, Norway");
+			End;
+				
+			ui.AddSeparator("Visualization Options: ", 1);
+			
+			If (constellation.Count > 100);
+				
+				ui.AddBooleanChoice("viewAsGroup", "View spacecraft as group? ", "Yes", "No", "Yes");
+			Else;
+				
+				ui.AddBooleanChoice("viewAsGroup", "View spacecraft as group? ", "Yes", "No", "No");
+			End;
+			
+			ui.AddLabel("View as group is recommended for constellations larger than 100 satellites to improve visualization speed.");
+			
+			Break;
+			
+		Default:
+			
+			// Do Nothing
+			Break;
+	End;
+	//EndBlock
+	
+	// Finally show the UserInterface
+	Show ui;
+EndProcedure;
+
+Define Procedure PerformCoverageAnalysisForFormation( Formation constellation, PointGroup pointsToAnalyze, Array totalRevisits,  Array pointsThatHaveBeenCovered, Variable scaleFactor);
+	
+	// Procedure that perfoms coverage analysis for a formation rather than an individual spacecraft
+	
+	// Object Creation
+	Variable i;
+	Array coverage;
+	Array revisit;
+	
+	// Iterate through constellation and analyze coverage for each spacecraft
+	For i = 0 to constellation.Count-1 with reset;
+		
+		pointsToAnalyze.Coverage(constellation[i], coverage, revisit);
+		totalRevisits = totalRevisits + revisit[0:(pointsToAnalyze.Count-1)];
+	End;
+	
+	
+	// Iterate through PointGroup and recolor points based off number of revisits
+	For i = 0 to pointsToAnalyze.Count-1;
+		
+		pointsToAnalyze[i].Color = ColorTools.InterpolateColorRGB({ColorTools.Red, ColorTools.DarkOrange,
+															   		ColorTools.Yellow, ColorTools.Lime,
+															   		ColorTools.Aqua, ColorTools.Blue, 
+															   		ColorTools.Fuchsia}, 
+															   		totalRevisits[i], 0, scaleFactor);
+		
+		// Check to see if the point has been visited, if so, add to tally
+		If (totalRevisits[i] > 0);
+			
+			pointsThatHaveBeenCovered[i] = 1;
+		End;
+	End;
+	
+EndProcedure;
+
+Define Procedure PopulatePointGroupBasedOnRegion(Region theRegion, PointGroup thePointGroup, Variable initialNumberOfPoints, Variable centerLatitude, Variable centerLongitude);
+
+	// Procedure to setup a PointGroup based off a defined region
+	
+	// Object creation
+	Variable i;
+	Variable j;
+	Variable maxLat = -90;
+	Variable minLat = 90;
+	Variable maxLon = 0;
+	Variable minLon = 360;
+	Variable lon;
+	Variable lat;
+	Variable prevLon;
+	Variable prevLat;
+	Variable lonSwitch;
+	Variable latSwitch;
+	Variable numOfPoints;
+	Variable aspectRatio;
+	Variable pointsAlongLon;
+	Variable pointsAlongLat;
+	Variable count;
+	
+	PointGroup boundingBoxPointGroup;
+	
+	Spacecraft sc;
+	
+	Array latPointsInRegion[0];
+	Array lonPointsInRegion[0];
+
+	//Block Determine bounding box for region
+	
+	For i = 0 to theRegion.NumberOfVertices-1;
+
+		If (sign(theRegion.Latitude[i]) != sign(prevLat));
+			If ((theRegion.Latitude[i] >= -90 and theRegion.Latitude[i] < -45) or
+				(theRegion.Latitude[i] <= 90 and theRegion.Latitude[i] > 45));
+				
+				latSwitch = 1;
+			Else;
+				
+				latSwitch = 0;
+			End;
+		End;			
+
+		If (sign(theRegion.Longitude[i]) != sign(prevLon));
+			If ((theRegion.Longitude[i] >= -180 and theRegion.Longitude[i] < -90) or
+				(theRegion.Longitude[i] <= 180 and theRegion.Longitude[i] > 90));
+				
+				lonSwitch = 1;
+			Else;
+				
+				lonSwitch = 0;
+			End;
+		End;			
+
+		prevLat = theRegion.Latitude[i];
+		prevLon = theRegion.Longitude[i];
+		
+		// If long switches signs around +/- 180, do this - otherwise do nothing
+		If (lonSwitch == 1 and theRegion.Longitude[i] < 0);
+			
+			lon = theRegion.Longitude[i] + 360;
+		Else;
+			
+			lon = theRegion.Longitude[i];
+		End;
+
+		// If lat switches signs around +/- 90, do this - otherwise do nothing
+		If (latSwitch == 1 and theRegion.Latitude[i] < 0);
+			
+			lat = theRegion.Latitude[i];// + 90;
+		Else;
+			
+			lat = theRegion.Latitude[i];
+		End;
+
+		If (lat < minLat);
+			
+			minLat = lat;
+		End;
+
+		If (lat > maxLat);
+			
+			maxLat = lat;
+		End;
+
+		If (lon < minLon);
+			
+			minLon = lon;
+		End;
+
+		If (lon > maxLon);
+			
+			maxLon = lon;
+		End;
+	End;
+	
+	// Cache the center lat/long of the bounding box:
+	centerLatitude = ((maxLat + minLat)/2);
+	centerLongitude = ((minLon + maxLon)/2);
+	//EndBlock
+
+	//Block Create PointGroup evenly spaced over bounding box
+
+	// Create a PointGroup evenly spaced over max/min
+	
+	numOfPoints = initialNumberOfPoints;  // Not necessarily final number of points: Rectangle will be largest that preserves aspect ratio. Use at least 150 pts.
+	aspectRatio = (maxLon - minLon)/(maxLat - minLat);      // Determine box size
+	pointsAlongLon = round(sqrt(numOfPoints*aspectRatio));  // Calculate number of columns
+	pointsAlongLat = round(pointsAlongLon/aspectRatio);     // Calculate number of rows
+
+	// Calculate number of points
+	count = (pointsAlongLat+1)*(pointsAlongLon+1);
+	
+	// Build rectangular PointGroup
+	boundingBoxPointGroup.PointDefinition = 2;
+	boundingBoxPointGroup.Count = count;
+	count = 0;
+	For i = minLat to maxLat step (maxLat - minLat)/pointsAlongLat;
+
+		For j = minLon to maxLon step (maxLon - minLon)/pointsAlongLon;
+
+			If (j > 360);
+				
+				j -= 360;
+			End;
+			If (i > 90);
+				
+				i -= 90;
+			End;
+
+			boundingBoxPointGroup[count].Longitude = j;
+			boundingBoxPointGroup[count].Latitude = i;
+			count++;
+		End;
+	End;
+	//EndBlock
+
+	//Block Define PointGroup in Region
+
+	// Place a Spacecraft at each point and determine whether SC is In Region
+	// If yes, add that point to latPointsInRegion and lonPointsInRegion Arrays
+
+	For i = 0 to boundingBoxPointGroup.Count-1;
+
+		// Assign Spacecraft location to current point of boundingBoxPointGroup
+		sc.Latitude = boundingBoxPointGroup[i].Latitude;
+		sc.Longitude = boundingBoxPointGroup[i].Longitude;
+
+		// Check whether the current point is inside the Region
+		If (sc.InRegion(theRegion) == 1);
+
+			// If so, add point to Arrays
+			latPointsInRegion.PushBack(boundingBoxPointGroup[i].Latitude);
+			lonPointsInRegion.PushBack(boundingBoxPointGroup[i].Longitude);
+		End;
+	End;
+
+	// Initialize the PointGroup with number of points determined above
+	thePointGroup.PointDefinition = 2;
+	thePointGroup.Count = latPointsInRegion.Dimension;
+
+	// Add points in Arrays to thePointGroup
+	For i = 0 to thePointGroup.Count-1;
+
+		thePointGroup[i].Latitude = latPointsInRegion[i];
+		thePointGroup[i].Longitude = lonPointsInRegion[i];
+	End;
+	
+	// Return value for number of points
+	initialNumberOfPoints = thePointGroup.NumberOfPoints;
+	//EndBlock
+EndProcedure;
+
+
+// Initialize Constellation
+
+// Show the UI with options for constellations and regions
+Show chooseConstType;
+
+If (constType == 0);  // If user chose "Custom Walker constellation"
+	
+	// Define initial Epoch for the Walker constellation, can be changed in UI
+	analysisStartEpochString = "Jan 01 2020 00:00:00.000000000";
+	
+	// Call procedure to setup constellation
+	Call RunWizardUserInterface(constellationUI, const, constType, viewAsGroup, regionToLoad, antenna, terminal, analysisStartEpochString, analysisDuration, nPlanes, nSCsPerPlane, inc, sma, ecc, w, pathToTLE, enableContact);
+	
+	// Assign values based off user inputs
+	const.ViewAsGroup = viewAsGroup;
+	analysisStartEpoch = analysisStartEpochString.ParseCalendarDate();
+	nSC = nPlanes * nSCsPerPlane;
+	const.Count = nSC;
+	
+	constName = "Walker";
+	
+	Report "Building Walker Constellation with " +const.Count.ToString + " satellites...." to Console;
+	Report "" to Console;
+ 	
+	//Block setup spacecraft based on definitions of constellation
+	For i = 0 to (nPlanes - 1);
+
+		incrRAAN = 360*(i/nPlanes);
+		For j = 0 to (nSCsPerPlane - 1);
+
+			incrMA = 360*(j/nSCsPerPlane);
+			const[j + i*nSCsPerPlane].Epoch = analysisStartEpoch;
+			const[j + i*nSCsPerPlane].BLJ2RAAN  = incrRAAN;
+			const[j + i*nSCsPerPlane].BLJ2MA    = incrMA;
+			const[j + i*nSCsPerPlane].BLJ2A     = sma;
+			const[j + i*nSCsPerPlane].BLJ2E     = ecc;
+			const[j + i*nSCsPerPlane].BLJ2I     = inc;
+			const[j + i*nSCsPerPlane].BLJ2W     = w;
+		End;
+	End;
+	//EndBlock
+	
+	// Setup time in which to aggregate chain contacts
+	chainSummaryTime = 60; 
+	chainSummaryTimeString = "one hour";
+	
+	// Calculate scale factor for visualization
+	scaleFactor = floor((const.Count*analysisDuration)/5);
+	If (scaleFactor <= 1);
+		scaleFactor = 1;	
+	End;
+	
+ElseIf (constType == 1); // If user chose "Iridium NEXT"
+	
+	// Load constellation from TLE
+	const.Count = GetNumberOfSGP4States("..\_Support_Files\Iridium.TLE");
+	const.LoadTLE("..\_Support_Files\Iridium.tle");
+	
+	// Setup the start Epoch to be displayed in the UI
+	analysisStartEpochString = const[0].Epoch.ConvertToCalendarDate();
+	
+	// Call procedure to setup constellation
+	Call RunWizardUserInterface(constellationUI, const, constType, viewAsGroup, regionToLoad, antenna, terminal, analysisStartEpochString, analysisDuration, nPlanes, nSCsPerPlane, inc, sma, ecc, w, pathToTLE, enableContact);
+	
+	// Assign values based off user inputs
+	const.ViewAsGroup = viewAsGroup;
+	analysisStartEpoch = analysisStartEpochString.ParseCalendarDate();
+	
+	constName = "Iridium";
+	
+	Report "Building Iridium NEXT Constellation with " +const.Count.ToString + " satellites...." to Console;
+	Report "" to Console;
+	
+	// Step to the input start epoch
+	Report "Synchronizing TLE states...." to Console;
+	Report "" to Console;
+	
+	const.StepToEpoch(analysisStartEpoch);
+	
+	Report "Initializing constellation visualization...." to Console;
+	Report "" to Console;
+	
+	// Setup time in which to total chain contacts
+	chainSummaryTime = 60; 
+	chainSummaryTimeString = "one hour";
+	
+	// Calculate scale factor for visualization
+	scaleFactor = floor((const.Count*analysisDuration)/5);
+	If (scaleFactor <= 1);
+		scaleFactor = 1;	
+	End;
+	
+	
+	
+ElseIf (constType == 2); // If user chose "Planet Labs"
+	
+	// Load constellation from TLE
+	const.Count = GetNumberOfSGP4States("..\_Support_Files\Planet.tle");
+	const.LoadTLE("..\_Support_Files\Planet.tle");
+	
+	// Setup the start Epoch to be displayed in the UI
+	analysisStartEpochString = const[0].Epoch.ConvertToCalendarDate();
+	
+	// Call procedure to setup constellation
+	Call RunWizardUserInterface(constellationUI, const, constType, viewAsGroup, regionToLoad, antenna, terminal, analysisStartEpochString, analysisDuration, nPlanes, nSCsPerPlane, inc, sma, ecc, w, pathToTLE, enableContact);
+	
+	// Assign values based off user inputs
+	const.ViewAsGroup = viewAsGroup;
+	analysisStartEpoch = analysisStartEpochString.ParseCalendarDate();
+	
+	constName = "PlanetLabs";
+	
+	Report "Building Planet Labs Constellation with "+const.Count.ToString + " satellites...." to Console;
+	Report "" to Console;
+	
+	// Step to the input start epoch
+	Report "Synchronizing TLE states...." to Console;
+	Report "" to Console;
+	
+	const.StepToEpoch(analysisStartEpoch);
+	
+	Report "Initializing constellation visualization...." to Console;
+	Report "" to Console;
+	
+	// Setup time in which to total chain contacts
+	chainSummaryTime = 60; 
+	chainSummaryTimeString = "one hour";
+	
+	// Calculate scale factor for visualization
+	scaleFactor = floor((const.Count*analysisDuration)/9);
+	If (scaleFactor <= 1);
+		scaleFactor = 1;	
+	End;
+	
+ElseIf (constType == 3); // If user chose "Kepler"
+	
+	// Load constellation from TLE	
+	const.Count = GetNumberOfSGP4States("..\_Support_Files\KeplerApproximation.tle");
+	const.LoadTLE("..\_Support_Files\KeplerApproximation.tle");
+	
+	// Setup the start Epoch to be displayed in the UI
+	analysisStartEpochString = const[0].Epoch.ConvertToCalendarDate();
+	
+	// Call procedure to setup constellation
+	Call RunWizardUserInterface(constellationUI, const, constType, viewAsGroup, regionToLoad, antenna, terminal, analysisStartEpochString, analysisDuration, nPlanes, nSCsPerPlane, inc, sma, ecc, w, pathToTLE, enableContact);
+	
+	// Assign values based off user inputs
+	const.ViewAsGroup = viewAsGroup;
+	analysisStartEpoch = analysisStartEpochString.ParseCalendarDate();
+
+	constName = "Kepler";
+	
+	Report "Building Kepler Constellation with " +const.Count.ToString + " satellites...."  to Console;
+	Report "" to Console;
+	
+	// Step to the input start epoch
+	Report "Synchronizing TLE states...." to Console;
+	Report "" to Console;
+		
+	const.StepToEpoch(analysisStartEpoch);
+	
+	Report "Initializing constellation visualization...." to Console;
+	Report "" to Console;
+	
+	// Setup time in which to total chain contacts
+	chainSummaryTime = 30; 
+	chainSummaryTimeString = "30 minutes";
+	
+	// Calculate scale factor for visualization
+	scaleFactor = floor((const.Count*analysisDuration)/10);
+	If (scaleFactor <= 1);
+		scaleFactor = 1;	
+	End;
+	
+ElseIf (constType == 4); // If user chose "Starlink"
+	
+	// Load constellation from TLE	
+	const.LoadTLE("..\_Support_Files\StarlinkPhase1Approximation.tle");
+	
+	// Set up the start Epoch to be displayed in the UI
+	analysisStartEpochString = const[0].Epoch.ConvertToCalendarDate();
+	
+	// Call procedure to setup constellation
+	Call RunWizardUserInterface(constellationUI, const, constType, viewAsGroup, regionToLoad, antenna, terminal, analysisStartEpochString, analysisDuration, nPlanes, nSCsPerPlane, inc, sma, ecc, w, pathToTLE, enableContact);
+	
+	// Assign values based off user inputs
+	const.ViewAsGroup = viewAsGroup;
+	analysisStartEpoch = analysisStartEpochString.ParseCalendarDate();
+	
+	constName = "Starlink";
+	Report "Building Starlink Constellation with " +const.Count.ToString + " satellites...."  to Console;
+	Report "" to Console;
+	
+	const.StepToEpoch(analysisStartEpoch);
+	
+	Report "Initializing constellation visualization...." to Console;
+	Report "" to Console;
+		
+	// Setup time in which to total chain contacts
+	chainSummaryTime = 10; 
+	chainSummaryTimeString = "10 minutes";
+	
+	// Calculate scale factor for visualization
+	scaleFactor = floor((const.Count*analysisDuration)/7);
+	If (scaleFactor <= 1);
+		scaleFactor = 1;	
+	End;
+	
+ElseIf (constType == 5);  // User has chosen "Input TLE file"
+	
+	Show selectTLE;
+	
+	// Load constellation from TLE
+	const.Count = GetNumberOfSGP4States(pathToTLE);
+	const.LoadTLE(pathToTLE);
+	
+	// Load the start Epoch to be displayed in the UI
+	analysisStartEpochString = const[0].Epoch.ConvertToCalendarDate();
+	
+	// Call procedure to setup constellation
+	Call RunWizardUserInterface(constellationUI, const, constType, viewAsGroup, regionToLoad, antenna, terminal, analysisStartEpochString, analysisDuration, nPlanes, nSCsPerPlane, inc, sma, ecc, w, pathToTLE, enableContact);
+	
+	// Assign values based off user inputs
+	const.ViewAsGroup = viewAsGroup;
+	analysisStartEpoch = analysisStartEpochString.ParseCalendarDate();
+
+	constName = "TLE Formation";
+	
+	Report "Building constellation based on TLE input with " +const.Count.ToString + " satellites...."  to Console;
+	Report "" to Console;
+	
+	// Step to the input start epoch
+	Report "Synchronizing TLE states...." to Console;
+	Report "" to Console;
+	
+	// Step to the input start epoch
+	const.StepToEpoch(analysisStartEpoch);
+	
+	Report "Initializing constellation visualization...." to Console;
+	Report "" to Console;
+	
+	// Setup time in which to total chain contacts
+	chainSummaryTime = 30; 
+	chainSummaryTimeString = "30 minutes";
+	
+	// Calculate scale factor for visualization
+	scaleFactor = floor((const.Count*analysisDuration)/5);
+	If (scaleFactor <= 1);
+		scaleFactor = 1;	
+	End;
+End;
+
+// General constellation configuration:
+For i = 0 to const.Count-1;
+
+	// Set spacecraft names:
+	const[i].DisplayName = constName + "_"+ (i+1).ToString();
+
+	// Add Sensors to the constellation members:
+	const[i].AddSensor("s" + (i+1).ToString());
+	const[i].Sensors[0].MaskType = 1; // Cone
+	const[i].Sensors[0].Color = const[i].Color;
+	const[i].Sensors[0].ConeHalfAngle = sensorConeHalfAngle;
+
+	// Use the Cowell propagator for speed:
+	const[i].SetPropagatorType(TypeOf(Cowell));
+
+	// Set the propagator step size:
+	const[i].Propagator.StepSize = TimeSpan.FromSeconds(60); // s
+End;
+
+
+// Initialize Region Point Groups
+
+Variable setFlag      = 0;
+Variable pointScaling = 0;
+
+Switch (regionToLoad);
+	Case 0:
+		If (setFlag == 0);
+			pointScaling = 2.0;
+			Get analysisRegion from "..\_Support_Files\CONUS.reg"; // Load Continental US region
+			setFlag = 1;
+		End;
+	Case 1:
+		If (setFlag == 0);
+			pointScaling = 3.0;
+			Get analysisRegion from "..\_Support_Files\africa.reg"; // Load Northern Africa region
+			setFlag = 1;
+		End;
+	Case 2:
+		If (setFlag == 0);
+			pointScaling = 1.5;
+			Get analysisRegion from "..\_Support_Files\canada.reg"; // Load Canada region
+			setFlag = 1;
+		End;
+		
+		// Define the PointGroup based on the selected Region:
+		Call PopulatePointGroupBasedOnRegion(analysisRegion, coveragePointGroup, numberOfPoints, centerLat, centerLong);
+		
+		// Initialize the coverage and revisit arrays:
+		lCoverage.Count = const.Count;
+		
+		For i = 0 to lCoverage.Count-1;
+			lCoverage[i].Dimension = numberOfPoints;
+		End;
+		
+		totalNumberOfRevisits.Dimension = numberOfPoints;
+		pointHasBeenCovered.Dimension   = numberOfPoints;
+		
+		// Resize points based on number
+		For i = 0 to coveragePointGroup.Count-1;
+			coveragePointGroup[i].Size = max(1,pointScaling*1500/(coveragePointGroup.Count));
+			coveragePointGroup[i].Height = 20*1500/(coveragePointGroup.Count); // Changing height reduces clipping with planetary surface
+		End;
+		
+		Break;
+		
+	Case 3:
+		// Initialize point group
+		coveragePointGroup.PointDefinition=1;
+		coveragePointGroup.NumberOfPoints=numberOfPoints;
+		
+		// Initialize the coverage and revisit arrays:
+		lCoverage.Count = const.Count;
+		
+		For i = 0 to lCoverage.Count-1;
+			lCoverage[i].Dimension = numberOfPoints;
+		End;
+		
+		totalNumberOfRevisits.Dimension = numberOfPoints;
+		pointHasBeenCovered.Dimension   = numberOfPoints;
+		
+		// Resize points based on number
+		For i = 0 to coveragePointGroup.Count-1;
+			coveragePointGroup[i].Size = max(1,12*1500/(coveragePointGroup.Count));
+			coveragePointGroup[i].Height = 40*1500/(coveragePointGroup.Count); // Changing height reduces clipping with planetary surface
+		End;
+		
+		// Note: Visualization setup is done with ground stations for global mode
+		Break;
+		
+	Default:
+		//Do Nothing
+		Break;
+End;
+
+
+// Initialize Contact Objects
+
+If (enableContact == 1);
+	If (regionToLoad != 3); // Not Global
+		antennaLocationIndex      = floor(coveragePointGroup.Count/2);
+		If (regionToLoad != 2);
+			terminalLocationIndex = antennaLocationIndex + 30; // Continental US or Africa
+		Else;
+			terminalLocationIndex = antennaLocationIndex - 65; // Canada
+		End;
+			
+		// Configure the GroundStation representing the antenna:
+		gsAntenna.Latitude      = coveragePointGroup.PointLatitude[antennaLocationIndex];
+		gsAntenna.Longitude     = coveragePointGroup.PointLongitude[antennaLocationIndex];
+		gsAntenna.Height        = coveragePointGroup.PointHeight[antennaLocationIndex];
+		gsAntenna.Color         = ColorTools.Lime;
+		gsAntenna.ConeElevation = 30;
+		gsAntenna.Opacity       = 0.2;
+		
+		// Configure the GroundStation representing the terminal:
+		gsTerminal.Latitude      = coveragePointGroup.PointLatitude[terminalLocationIndex];
+		gsTerminal.Longitude     = coveragePointGroup.PointLongitude[terminalLocationIndex];
+		gsTerminal.Height        = coveragePointGroup.PointHeight[terminalLocationIndex];
+		gsTerminal.Color         = ColorTools.Cyan;
+		gsTerminal.ConeElevation = 30;
+		gsTerminal.Opacity       = 0.2;
+		
+	Else; // Global 
+	// Choose the points at which to place the antenna and terminal:
+	If (antenna == terminal); 
+		Console.CurrentTextColor = ColorTools.OrangeRed;
+		Report "Two different ground sites must be selected when coverage analysis is requested. " +
+			   "Rerun the Mission Plan with this issue corrected to view your requested results." to Console;
+		Stop;
+	End;
+		// Use structs to consolidate this data assignment
+		gsAntenna.DisplayName  = allStationData[antenna].name;
+		gsTerminal.DisplayName = allStationData[terminal].name;
+		
+		//Block Configure Ground Stations
+		// Configure the GroundStation representing the antenna (ground station one)
+		gsAntenna.Latitude      = allStationData[antenna].lat; 
+		gsAntenna.Longitude     = allStationData[antenna].long;
+		gsAntenna.Height        = coveragePointGroup.PointHeight[0];
+		gsAntenna.Color         = ColorTools.Lime;
+		gsAntenna.ConeElevation = 30;
+		gsAntenna.Opacity       = 0.2;
+		
+		// Configure the GroundStation representing the terminal (ground station two)
+		gsTerminal.Latitude      = allStationData[terminal].lat;
+		gsTerminal.Longitude     = allStationData[terminal].long;
+		gsTerminal.Height        = coveragePointGroup.PointHeight[0];
+		gsTerminal.Color         = ColorTools.Cyan;
+		gsTerminal.ConeElevation = 30;
+		gsTerminal.Opacity       = 0.2;
+		
+		// Set the center latitude and longitude based off selected ground stations 
+		centerLat  = (gsAntenna.Latitude  + gsTerminal.Latitude)/2;
+		centerLong = (gsAntenna.Longitude + gsTerminal.Longitude)/2;
+
+		//EndBlock
+	End;
+
+	// Configure the List of VisibilityCalculators and Lists of Vectors:
+	lvcContactEvaluators.Count = const.Count;
+	lvecAntennaToSC.Count      = const.Count;
+	lvecSCToTerminal.Count     = const.Count;
+
+	//Block Configure VisibilitySegments
+	
+	For i = 0 to const.Count-1;
+
+		// Configure the first visibility segment (antenna to SC):
+		lvcContactEvaluators[i].AddSegment();
+		lvcContactEvaluators[i].Segments[0].SetObserver(gsAntenna);
+		lvcContactEvaluators[i].Segments[0].SetTarget(const[i]);
+		lvcContactEvaluators[i].Segments[0].AddOccultingBody(Earth);
+		lvcContactEvaluators[i].Segments[0].CelestialObjectOccultationModel = 1;
+
+		// Configure the second visibility segment (SC to terminal):
+		lvcContactEvaluators[i].AddSegment();
+		lvcContactEvaluators[i].Segments[1].SetObserver(const[i]);
+		lvcContactEvaluators[i].Segments[1].SetTarget(gsTerminal);
+		lvcContactEvaluators[i].Segments[1].AddOccultingBody(Earth);
+		lvcContactEvaluators[i].Segments[1].CelestialObjectOccultationModel = 1;
+
+		// Set the requirement for visibility to return true:
+		lvcContactEvaluators[i].VisibilityRequirement = 0; // All
+
+		// Set the vector colors:
+		lvecAntennaToSC[i].Color  = gsAntenna.Color;
+		lvecSCToTerminal[i].Color = gsTerminal.Color;
+
+	End;
+	
+	//EndBlock
+
+	// Initialize objects to store contact start and end epochs:
+	aNumEvents.Dimension = const.Count;
+	lEventTimes.Count    = const.Count;
+	lEventTypes.Count    = const.Count;
+
+	// Set up vectors for chain contact
+	For i=0 to const.Count-1;
+		lvecAntennaToSC[i].BuildVector(9, gsAntenna, const[i]);
+		lvecSCToTerminal[i].BuildVector(9, const[i], gsTerminal);
+	End;
+End;
+
+
+// Create Output Windows
+
+// Create a WindowOverlay to use as a window frame:
+//Block Window Frame
+
+WindowOverlay woWindowFrame;
+woWindowFrame.RemoveAllShapes();
+woWindowFrame.AddShape();
+woWindowFrame.Shapes[0].Type = "Rectangle";
+woWindowFrame.Shapes[0].SetSize(0, 1, 1);
+woWindowFrame.Shapes[0].RectangleOptions.FillOpacity = 0;
+woWindowFrame.Shapes[0].RectangleOptions.BorderOpacity = 1;
+woWindowFrame.Shapes[0].RectangleOptions.BorderColor = ColorTools.White;
+woWindowFrame.Shapes[0].RectangleOptions.BorderWidth = 1;
+
+//EndBlock
+
+width  = 250;
+height = 25;
+
+// Create a custom status overlay to display the analysis epoch and current coverage statistics
+//Block Status Overlay
+
+WindowOverlay woStatusOverlay;
+woStatusOverlay.RemoveAllShapes();
+
+woStatusOverlay.AddShape();
+woStatusOverlay.Shapes[0].Type = "Rectangle";
+woStatusOverlay.Shapes[0].SetSize(1, width, 6*height);
+woStatusOverlay.Shapes[0].SetPosition(1, 0, 0);
+woStatusOverlay.Shapes[0].RectangleOptions.FillOpacity = 1;
+woStatusOverlay.Shapes[0].RectangleOptions.FillColor = ColorTools.Black;
+woStatusOverlay.Shapes[0].RectangleOptions.BorderOpacity = 1;
+woStatusOverlay.Shapes[0].RectangleOptions.BorderColor = ColorTools.White;
+woStatusOverlay.Shapes[0].TextOptions.SetBackdropCornerRadius(1, 0);
+woStatusOverlay.Shapes[0].RectangleOptions.BorderWidth = 1;
+
+woStatusOverlay.AddShape();
+woStatusOverlay.Shapes[1].Type = "Text";
+woStatusOverlay.Shapes[1].SetSize(1,width, height);
+woStatusOverlay.Shapes[1].ReferencePoint = {0, 0};
+woStatusOverlay.Shapes[1].SetPosition(1, 0, height);
+woStatusOverlay.Shapes[1].TextOptions.ShowBackdrop = 1;
+woStatusOverlay.Shapes[1].TextOptions.BackdropFillColor   = ColorTools.Black;
+woStatusOverlay.Shapes[1].TextOptions.BackdropFillOpacity = 1;
+woStatusOverlay.Shapes[1].TextOptions.BackdropBorderOpacity = 1;
+woStatusOverlay.Shapes[1].TextOptions.BackdropBorderColor = ColorTools.White;
+woStatusOverlay.Shapes[1].TextOptions.SetBackdropCornerRadius(1, 0);
+woStatusOverlay.Shapes[1].TextOptions.AlignmentHorizontal = 1;
+woStatusOverlay.Shapes[1].TextOptions.AlignmentVertical   = 1;
+woStatusOverlay.Shapes[1].TextOptions.Font.Bold = 1;
+woStatusOverlay.Shapes[1].TextOptions.Font.Size = 15;
+woStatusOverlay.Shapes[1].TextOptions.Text = "EPOCH";
+
+woStatusOverlay.AddShape();
+woStatusOverlay.Shapes[2].Type = "Text";
+woStatusOverlay.Shapes[2].SetSize(1, width, height);
+woStatusOverlay.Shapes[2].ReferencePoint = {0, 0};
+woStatusOverlay.Shapes[2].SetPosition(1, 0, 2*height);
+woStatusOverlay.Shapes[2].TextOptions.ShowBackdrop = 1;
+woStatusOverlay.Shapes[2].TextOptions.BackdropFillColor   = ColorTools.Black;
+woStatusOverlay.Shapes[2].TextOptions.BackdropFillOpacity = 1;
+woStatusOverlay.Shapes[2].TextOptions.BackdropBorderColor = ColorTools.White;
+woStatusOverlay.Shapes[2].TextOptions.SetBackdropCornerRadius(1, 0);
+woStatusOverlay.Shapes[2].TextOptions.AlignmentHorizontal = 1;
+woStatusOverlay.Shapes[2].TextOptions.AlignmentVertical   = 1;
+woStatusOverlay.Shapes[2].TextOptions.Font.Size = 13;
+woStatusOverlay.Shapes[2].TextOptions.Text = const[0].EpochText; 
+
+woStatusOverlay.AddShape();
+woStatusOverlay.Shapes[3].Type = "Text";
+woStatusOverlay.Shapes[3].SetSize(1, width, height);
+woStatusOverlay.Shapes[3].ReferencePoint = {0, 0};
+woStatusOverlay.Shapes[3].SetPosition(1, 0, 3*height);
+woStatusOverlay.Shapes[3].TextOptions.ShowBackdrop = 1;
+woStatusOverlay.Shapes[3].TextOptions.BackdropFillColor   = ColorTools.Black;
+woStatusOverlay.Shapes[3].TextOptions.BackdropFillOpacity = 1;
+woStatusOverlay.Shapes[3].TextOptions.BackdropBorderOpacity = 1;
+woStatusOverlay.Shapes[3].TextOptions.BackdropBorderColor = ColorTools.White;
+woStatusOverlay.Shapes[3].TextOptions.SetBackdropCornerRadius(1, 0);
+woStatusOverlay.Shapes[3].TextOptions.AlignmentHorizontal = 1;
+woStatusOverlay.Shapes[3].TextOptions.AlignmentVertical   = 1;
+woStatusOverlay.Shapes[3].TextOptions.Font.Bold = 1;
+woStatusOverlay.Shapes[3].TextOptions.Font.Size = 15;
+woStatusOverlay.Shapes[3].TextOptions.Text = "COVERAGE";
+
+woStatusOverlay.AddShape();
+woStatusOverlay.Shapes[4].Type = "Text";
+woStatusOverlay.Shapes[4].SetSize(1, width/2, height);
+woStatusOverlay.Shapes[4].ReferencePoint = {0, 0};
+woStatusOverlay.Shapes[4].SetPosition(1, 0, 4*height);
+woStatusOverlay.Shapes[4].TextOptions.ShowBackdrop = 1;
+woStatusOverlay.Shapes[4].TextOptions.BackdropFillColor   = ColorTools.Black;
+woStatusOverlay.Shapes[4].TextOptions.BackdropFillOpacity = 1;
+woStatusOverlay.Shapes[4].TextOptions.BackdropBorderOpacity = 1;
+woStatusOverlay.Shapes[4].TextOptions.BackdropBorderColor = ColorTools.White;
+woStatusOverlay.Shapes[4].TextOptions.SetBackdropCornerRadius(1, 0);
+woStatusOverlay.Shapes[4].TextOptions.AlignmentHorizontal = 1;
+woStatusOverlay.Shapes[4].TextOptions.AlignmentVertical   = 1;
+woStatusOverlay.Shapes[4].TextOptions.Font.Bold = 0;
+woStatusOverlay.Shapes[4].TextOptions.Font.Size = 13;
+woStatusOverlay.Shapes[4].TextOptions.Text = "NumPoints: ";
+
+woStatusOverlay.AddShape();
+woStatusOverlay.Shapes[5].Type = "Text";
+woStatusOverlay.Shapes[5].SetSize(1, width/2, height);
+woStatusOverlay.Shapes[5].ReferencePoint = {0, 0};
+woStatusOverlay.Shapes[5].SetPosition(1, width/2, 4*height);
+woStatusOverlay.Shapes[5].TextOptions.ShowBackdrop = 1;
+woStatusOverlay.Shapes[5].TextOptions.BackdropFillColor   = ColorTools.Black;
+woStatusOverlay.Shapes[5].TextOptions.BackdropFillOpacity = 1;
+woStatusOverlay.Shapes[5].TextOptions.BackdropBorderOpacity = 1;
+woStatusOverlay.Shapes[5].TextOptions.BackdropBorderColor = ColorTools.White;
+woStatusOverlay.Shapes[5].TextOptions.SetBackdropCornerRadius(1, 0);
+woStatusOverlay.Shapes[5].TextOptions.AlignmentHorizontal = 1;
+woStatusOverlay.Shapes[5].TextOptions.AlignmentVertical   = 1;
+woStatusOverlay.Shapes[5].TextOptions.Font.Bold = 0;
+woStatusOverlay.Shapes[5].TextOptions.Font.Size = 13;
+woStatusOverlay.Shapes[5].TextOptions.Text = pointHasBeenCovered.Sum().ToString() + "/" + coveragePointGroup.NumberOfPoints.ToString();
+
+woStatusOverlay.AddShape();
+woStatusOverlay.Shapes[6].Type = "Text";
+woStatusOverlay.Shapes[6].SetSize(1, width/2, height);
+woStatusOverlay.Shapes[6].ReferencePoint = {0, 0};
+woStatusOverlay.Shapes[6].SetPosition(1, 0, 5*height);
+woStatusOverlay.Shapes[6].TextOptions.ShowBackdrop = 1;
+woStatusOverlay.Shapes[6].TextOptions.BackdropFillColor   = ColorTools.Black;
+woStatusOverlay.Shapes[6].TextOptions.BackdropFillOpacity = 1;
+woStatusOverlay.Shapes[6].TextOptions.BackdropBorderOpacity = 1;
+woStatusOverlay.Shapes[6].TextOptions.BackdropBorderColor = ColorTools.White;
+woStatusOverlay.Shapes[6].TextOptions.SetBackdropCornerRadius(1, 0);
+woStatusOverlay.Shapes[6].TextOptions.AlignmentHorizontal = 1;
+woStatusOverlay.Shapes[6].TextOptions.AlignmentVertical   = 1;
+woStatusOverlay.Shapes[6].TextOptions.Font.Bold = 0;
+woStatusOverlay.Shapes[6].TextOptions.Font.Size = 13;
+woStatusOverlay.Shapes[6].TextOptions.Text = "Percent: ";
+
+woStatusOverlay.AddShape();
+woStatusOverlay.Shapes[7].Type = "Text";
+woStatusOverlay.Shapes[7].SetSize(1, width/2, height);
+woStatusOverlay.Shapes[7].ReferencePoint = {0, 0};
+woStatusOverlay.Shapes[7].SetPosition(1, width/2, 5*height);
+woStatusOverlay.Shapes[7].TextOptions.ShowBackdrop = 1;
+woStatusOverlay.Shapes[7].TextOptions.BackdropFillColor   = ColorTools.Black;
+woStatusOverlay.Shapes[7].TextOptions.BackdropFillOpacity = 1;
+woStatusOverlay.Shapes[7].TextOptions.BackdropBorderOpacity = 1;
+woStatusOverlay.Shapes[7].TextOptions.BackdropBorderColor = ColorTools.White;
+woStatusOverlay.Shapes[7].TextOptions.SetBackdropCornerRadius(1, 0);
+woStatusOverlay.Shapes[7].TextOptions.AlignmentHorizontal = 1;
+woStatusOverlay.Shapes[7].TextOptions.AlignmentVertical   = 1;
+woStatusOverlay.Shapes[7].TextOptions.Font.Bold = 0;
+woStatusOverlay.Shapes[7].TextOptions.Font.Size = 13;
+woStatusOverlay.Shapes[7].TextOptions.Text = ((pointHasBeenCovered.Sum()/coveragePointGroup.NumberOfPoints)*100).Format("%3.2f") + "%";
+
+woStatusOverlay.AddShape();
+woStatusOverlay.Shapes[8].Type = "Text";
+woStatusOverlay.Shapes[8].SetSize(1,width, height);
+woStatusOverlay.Shapes[8].ReferencePoint = {0, 0};
+woStatusOverlay.Shapes[8].SetPosition(1, 0, 0);
+woStatusOverlay.Shapes[8].TextOptions.ShowBackdrop = 1;
+woStatusOverlay.Shapes[8].TextOptions.BackdropFillColor   = ColorTools.Black;
+woStatusOverlay.Shapes[8].TextOptions.BackdropFillOpacity = 1;
+woStatusOverlay.Shapes[8].TextOptions.BackdropBorderOpacity = 1;
+woStatusOverlay.Shapes[8].TextOptions.BackdropBorderColor = ColorTools.White;
+woStatusOverlay.Shapes[8].TextOptions.SetBackdropCornerRadius(1, 0);
+woStatusOverlay.Shapes[8].TextOptions.AlignmentHorizontal = 1;
+woStatusOverlay.Shapes[8].TextOptions.AlignmentVertical   = 1;
+woStatusOverlay.Shapes[8].TextOptions.Font.Bold = 1;
+woStatusOverlay.Shapes[8].TextOptions.Font.Size = 17;
+woStatusOverlay.Shapes[8].TextOptions.Text = constName;
+
+woStatusOverlay.SetRenderingOrder({8,7, 6, 5, 4, 3, 2, 1, 0});
+
+//EndBlock
+
+// Create a custom status overlay to display the legend for number of contacts with a point
+//Block Legend Overlay
+
+WindowOverlay woLegend;
+
+woLegend.RemoveAllShapes();
+woLegend.AddShape();
+woLegend.Shapes[0].Type = "Rectangle";
+woLegend.Shapes[0].SetSize(1, width, 60);
+woLegend.Shapes[0].SetPosition(1,0,6*height);
+woLegend.Shapes[0].RectangleOptions.FillOpacity = 0;
+woLegend.Shapes[0].RectangleOptions.FillColor = ColorTools.Black;
+woLegend.Shapes[0].RectangleOptions.BorderOpacity = 1;
+woLegend.Shapes[0].RectangleOptions.BorderColor = ColorTools.White;
+woLegend.Shapes[0].TextOptions.SetBackdropCornerRadius(1, 0);
+woLegend.Shapes[0].RectangleOptions.BorderWidth = 1;
+
+woLegend.AddShape();
+woLegend.Shapes[1].Type = "Text";
+woLegend.Shapes[1].SetSize(1,width,25);
+woLegend.Shapes[1].SetPosition(1,0,6*height+35);
+woLegend.Shapes[1].TextOptions.BackdropFillOpacity = 1;
+woLegend.Shapes[1].TextOptions.BackdropFillColor = ColorTools.Black;
+woLegend.Shapes[1].TextOptions.BackdropBorderOpacity = 1;
+woLegend.Shapes[1].TextOptions.BackdropBorderColor = ColorTools.White;
+woLegend.Shapes[1].TextOptions.AlignmentHorizontal = 1;
+woLegend.Shapes[1].TextOptions.AlignmentVertical   = 1;
+woLegend.Shapes[1].TextOptions.Font.Size = 13;
+woLegend.Shapes[1].TextOptions.Font.Bold = 1;
+woLegend.Shapes[1].TextOptions.Text = "0                 Times Seen                 "+ (scaleFactor).ToString ;
+
+woLegend.AddShape();
+woLegend.Shapes[2].Type = "Rectangle";
+woLegend.Shapes[2].SetSize(1,width,25);
+woLegend.Shapes[2].SetPosition(1,0,6*height+35);
+woLegend.Shapes[2].RectangleOptions.FillOpacity = 1;
+woLegend.Shapes[2].RectangleOptions.FillColor = ColorTools.Black;
+woLegend.Shapes[2].RectangleOptions.BorderOpacity = 1;
+woLegend.Shapes[2].RectangleOptions.BorderColor = ColorTools.White;
+count=3;
+
+//Iterate through the colors represented in the points to create a legend
+For i = 0 to scaleFactor;
+	color = ColorTools.InterpolateColorRGB({ColorTools.Red, ColorTools.DarkOrange,
+															   ColorTools.Yellow, ColorTools.Lime,
+															   ColorTools.Aqua, ColorTools.Blue, 
+															   ColorTools.Fuchsia}, i/(scaleFactor));
+	woLegend.AddShape();
+	woLegend.Shapes[i+3].Type = "Rectangle";
+	woLegend.Shapes[i+3].SetSize(1,width/(scaleFactor+1),35);
+	woLegend.Shapes[i+3].SetPosition(1,i*width/(scaleFactor+1),6*height);
+	woLegend.Shapes[i+3].RectangleOptions.BorderWidth = 0;
+	woLegend.Shapes[i+3].RectangleOptions.FillColor = color;
+	woLegend.Shapes[i+3].RectangleOptions.BorderColor = color;
+	woLegend.Shapes[i+3].RectangleOptions.FillOpacity = 1;
+	
+	count++;
+End;
+
+woLegend.AddShape();
+woLegend.Shapes[count].Type="Rectangle";
+woLegend.Shapes[count].SetSize(1,width,35);
+woLegend.Shapes[count].SetPosition(1,0,6*height);
+woLegend.Shapes[count].RectangleOptions.FillOpacity = 1;
+woLegend.Shapes[count].RectangleOptions.FillColor = ColorTools.White;
+woLegend.Shapes[count].RectangleOptions.BorderOpacity = 1;
+woLegend.Shapes[count].RectangleOptions.BorderColor = ColorTools.White;
+
+//EndBlock
+
+// Create a custom status overlay to display the contact between ground stations and spacecraft, only do this if contact analysis is enabled
+//Block Contact Overlay
+WindowOverlay woContactOverlay;
+
+// Only build this overlay if contact analysis is being performed
+If (enableContact == 1);
+
+	woContactOverlay.RemoveAllShapes();
+	woContactOverlay.AddShape();
+	woContactOverlay.Shapes[0].Type = "Rectangle";
+	woContactOverlay.Shapes[0].SetSize(1, width, 3*height+35);
+	woContactOverlay.Shapes[0].SetPosition(1,0,7*height+35);
+	woContactOverlay.Shapes[0].RectangleOptions.FillOpacity = 1;
+	woContactOverlay.Shapes[0].RectangleOptions.FillColor = ColorTools.Black;
+	woContactOverlay.Shapes[0].RectangleOptions.BorderOpacity = 1;
+	woContactOverlay.Shapes[0].RectangleOptions.BorderColor = ColorTools.White;
+	woContactOverlay.Shapes[0].TextOptions.SetBackdropCornerRadius(1, 0);
+	woContactOverlay.Shapes[0].RectangleOptions.BorderWidth = 1;
+
+	woContactOverlay.AddShape();
+	woContactOverlay.Shapes[1].Type = "Text";
+	woContactOverlay.Shapes[1].SetSize(1, width, 35);
+	woContactOverlay.Shapes[1].ReferencePoint = {0, 0};
+	woContactOverlay.Shapes[1].SetPosition(1,0, 7*height+35);
+	woContactOverlay.Shapes[1].TextOptions.ShowBackdrop = 1;
+	woContactOverlay.Shapes[1].TextOptions.BackdropFillColor   = ColorTools.Black;
+	woContactOverlay.Shapes[1].TextOptions.BackdropFillOpacity = 1;
+	woContactOverlay.Shapes[1].TextOptions.BackdropBorderOpacity = 1;
+	woContactOverlay.Shapes[1].TextOptions.BackdropBorderColor = ColorTools.White;
+	woContactOverlay.Shapes[1].TextOptions.SetBackdropCornerRadius(1, 0);
+	woContactOverlay.Shapes[1].TextOptions.AlignmentHorizontal = 1;
+	woContactOverlay.Shapes[1].TextOptions.AlignmentVertical   = 1;
+	woContactOverlay.Shapes[1].TextOptions.Font.Bold = 1;
+	woContactOverlay.Shapes[1].TextOptions.Font.Size = 15;
+	woContactOverlay.Shapes[1].TextOptions.Text = "CHAIN CONTACT WITH SPACECRAFT";
+
+	woContactOverlay.AddShape();
+	woContactOverlay.Shapes[2].Type = "Text";
+	woContactOverlay.Shapes[2].SetSize(1, width/3, height);
+	woContactOverlay.Shapes[2].ReferencePoint = {0, 0};
+	woContactOverlay.Shapes[2].SetPosition(1, 0, 7*height+2*35);
+	woContactOverlay.Shapes[2].TextOptions.ShowBackdrop = 1;
+	woContactOverlay.Shapes[2].TextOptions.BackdropFillColor   = ColorTools.Black;
+	woContactOverlay.Shapes[2].TextOptions.BackdropFillOpacity = 1;
+	woContactOverlay.Shapes[2].TextOptions.BackdropBorderOpacity = 1;
+	woContactOverlay.Shapes[2].TextOptions.BackdropBorderColor = ColorTools.White;
+	woContactOverlay.Shapes[2].TextOptions.SetBackdropCornerRadius(1, 0);
+	woContactOverlay.Shapes[2].TextOptions.AlignmentHorizontal = 1;
+	woContactOverlay.Shapes[2].TextOptions.AlignmentVertical   = 1;
+	woContactOverlay.Shapes[2].TextOptions.Font.Bold = 1;
+	woContactOverlay.Shapes[2].TextOptions.Font.Size = 13;
+	woContactOverlay.Shapes[2].TextOptions.Text = "SC ID:";
+
+	woContactOverlay.AddShape();
+	woContactOverlay.Shapes[3].Type = "Text";
+	woContactOverlay.Shapes[3].SetSize(1, 2*width/3, height);
+	woContactOverlay.Shapes[3].ReferencePoint = {0, 0};
+	woContactOverlay.Shapes[3].SetPosition(1, width/3, 7*height+2*35);
+	woContactOverlay.Shapes[3].TextOptions.ShowBackdrop = 1;
+	woContactOverlay.Shapes[3].TextOptions.BackdropFillColor   = ColorTools.Black;
+	woContactOverlay.Shapes[3].TextOptions.BackdropFillOpacity = 1;
+	woContactOverlay.Shapes[3].TextOptions.BackdropBorderOpacity = 1;
+	woContactOverlay.Shapes[3].TextOptions.BackdropBorderColor = ColorTools.White;
+	woContactOverlay.Shapes[3].TextOptions.SetBackdropCornerRadius(1, 0);
+	woContactOverlay.Shapes[3].TextOptions.AlignmentHorizontal = 1;
+	woContactOverlay.Shapes[3].TextOptions.AlignmentVertical   = 1;
+	woContactOverlay.Shapes[3].TextOptions.Font.Bold = 0;
+	woContactOverlay.Shapes[3].TextOptions.Font.Size = 13;
+	woContactOverlay.Shapes[3].TextOptions.Text = "No Contact";
+
+	woContactOverlay.AddShape();
+	woContactOverlay.Shapes[4].Type = "Text";
+	woContactOverlay.Shapes[4].SetSize(1, width/3,height);
+	woContactOverlay.Shapes[4].ReferencePoint = {0, 0};
+	woContactOverlay.Shapes[4].SetPosition(1, 0, 8*height+2*35);
+	woContactOverlay.Shapes[4].TextOptions.ShowBackdrop = 1;
+	woContactOverlay.Shapes[4].TextOptions.BackdropFillColor   = ColorTools.Black;
+	woContactOverlay.Shapes[4].TextOptions.BackdropFillOpacity = 1;
+	woContactOverlay.Shapes[4].TextOptions.BackdropBorderOpacity = 1;
+	woContactOverlay.Shapes[4].TextOptions.BackdropBorderColor = ColorTools.White;
+	woContactOverlay.Shapes[4].TextOptions.SetBackdropCornerRadius(1, 0);
+	woContactOverlay.Shapes[4].TextOptions.AlignmentHorizontal = 1;
+	woContactOverlay.Shapes[4].TextOptions.AlignmentVertical   = 1;
+	woContactOverlay.Shapes[4].TextOptions.Font.Bold = 1;
+	woContactOverlay.Shapes[4].TextOptions.Font.Size = 13;
+	woContactOverlay.Shapes[4].TextOptions.Text = "AoS:";
+
+	woContactOverlay.AddShape();
+	woContactOverlay.Shapes[5].Type = "Text";
+	woContactOverlay.Shapes[5].SetSize(1, 2*width/3, height);
+	woContactOverlay.Shapes[5].ReferencePoint = {0, 0};
+	woContactOverlay.Shapes[5].SetPosition(1, width/3, 8*height+2*35);
+	woContactOverlay.Shapes[5].TextOptions.ShowBackdrop = 1;
+	woContactOverlay.Shapes[5].TextOptions.BackdropFillColor   = ColorTools.Black;
+	woContactOverlay.Shapes[5].TextOptions.BackdropFillOpacity = 1;
+	woContactOverlay.Shapes[5].TextOptions.BackdropBorderOpacity = 1;
+	woContactOverlay.Shapes[5].TextOptions.BackdropBorderColor = ColorTools.White;
+	woContactOverlay.Shapes[5].TextOptions.SetBackdropCornerRadius(1, 0);
+	woContactOverlay.Shapes[5].TextOptions.AlignmentHorizontal = 1;
+	woContactOverlay.Shapes[5].TextOptions.AlignmentVertical   = 1;
+	woContactOverlay.Shapes[5].TextOptions.Font.Bold = 0;
+	woContactOverlay.Shapes[5].TextOptions.Font.Size = 13;
+	woContactOverlay.Shapes[5].TextOptions.Text = "No Contact";
+
+	woContactOverlay.AddShape();
+	woContactOverlay.Shapes[6].Type = "Text";
+	woContactOverlay.Shapes[6].SetSize(1, width/3, height);
+	woContactOverlay.Shapes[6].ReferencePoint = {0, 0};
+	woContactOverlay.Shapes[6].SetPosition(1, 0, 9*height+2*35);
+	woContactOverlay.Shapes[6].TextOptions.ShowBackdrop = 1;
+	woContactOverlay.Shapes[6].TextOptions.BackdropFillColor   = ColorTools.Black;
+	woContactOverlay.Shapes[6].TextOptions.BackdropFillOpacity = 1;
+	woContactOverlay.Shapes[6].TextOptions.BackdropBorderOpacity = 1;
+	woContactOverlay.Shapes[6].TextOptions.BackdropBorderColor = ColorTools.White;
+	woContactOverlay.Shapes[6].TextOptions.SetBackdropCornerRadius(1, 0);
+	woContactOverlay.Shapes[6].TextOptions.AlignmentHorizontal = 1;
+	woContactOverlay.Shapes[6].TextOptions.AlignmentVertical   = 1;
+	woContactOverlay.Shapes[6].TextOptions.Font.Bold = 1;
+	woContactOverlay.Shapes[6].TextOptions.Font.Size = 13;
+	woContactOverlay.Shapes[6].TextOptions.Text = "LoS:";
+
+	woContactOverlay.AddShape();
+	woContactOverlay.Shapes[7].Type = "Text";
+	woContactOverlay.Shapes[7].SetSize(1, 2*width/3, height);
+	woContactOverlay.Shapes[7].ReferencePoint = {0, 0};
+	woContactOverlay.Shapes[7].SetPosition(1, width/3, 9*height+2*35);
+	woContactOverlay.Shapes[7].TextOptions.ShowBackdrop = 1;
+	woContactOverlay.Shapes[7].TextOptions.BackdropFillColor   = ColorTools.Black;
+	woContactOverlay.Shapes[7].TextOptions.BackdropFillOpacity = 1;
+	woContactOverlay.Shapes[7].TextOptions.BackdropBorderOpacity = 1;
+	woContactOverlay.Shapes[7].TextOptions.BackdropBorderColor = ColorTools.White;
+	woContactOverlay.Shapes[7].TextOptions.SetBackdropCornerRadius(1, 0);
+	woContactOverlay.Shapes[7].TextOptions.AlignmentHorizontal = 1;
+	woContactOverlay.Shapes[7].TextOptions.AlignmentVertical   = 1;
+	woContactOverlay.Shapes[7].TextOptions.Font.Bold = 0;
+	woContactOverlay.Shapes[7].TextOptions.Font.Size = 13;
+	woContactOverlay.Shapes[7].TextOptions.Text = "No Contact";
+	woContactOverlay.SetRenderingOrder({7, 6, 5, 4, 3, 2, 1, 0});
+End;
+
+//EndBlock
+
+// Create a 3D View
+//Block 3D View
+
+ViewWindow vw3D({const, coveragePointGroup, woWindowFrame, woStatusOverlay, woLegend});
+
+// Only add these objects if contact analysis is being performed
+If (enableContact == 1);
+	
+	vw3D.AddObject(woContactOverlay);
+	vw3D.AddObject(gsAntenna);
+	vw3D.AddObject(gsTerminal);
+	vw3D.AddObject(lvecAntennaToSC);
+	vw3D.AddObject(lvecSCToTerminal);
+
+	// Set the GroundStation projection heights:
+	vw3D.SetProjectionHeight(gsAntenna.ObjectId, 50);
+	vw3D.SetProjectionHeight(gsTerminal.ObjectId, 50);
+End;
+
+vw3D.CurrentViewpoint.ThreeDView.ReferenceFrame  = "body fixed";
+vw3D.CurrentViewpoint.ThreeDView.Source          = Earth.ObjectId;
+vw3D.CurrentViewpoint.ThreeDView.Target          = Earth.ObjectId;
+vw3D.CurrentViewpoint.ThreeDView.TailReference   = Earth.ObjectId;
+
+setFlag = 0;
+
+Switch (regionToLoad);
+	Case 0:
+		If (setFlag == 0);
+			vw3D.CurrentViewpoint.ThreeDView.RightAscension = 280;
+			vw3D.CurrentViewpoint.ThreeDView.Declination    = 35;
+			setFlag = 1;
+		End;
+	Case 1:
+		If (setFlag == 0);
+			vw3D.CurrentViewpoint.ThreeDView.RightAscension = 20;
+			vw3D.CurrentViewpoint.ThreeDView.Declination    = 25;
+			setFlag = 1;
+		End;
+	Case 2:
+		If (setFlag == 0);
+			vw3D.CurrentViewpoint.ThreeDView.RightAscension = 270;
+			vw3D.CurrentViewpoint.ThreeDView.Declination    = 45;
+			setFlag = 1;
+		End;
+End;
+
+vw3D.CurrentViewpoint.ThreeDView.Radius = 2.75 * const[0].A;
+
+// Hide the names of the planets from the view:
+For i = 0 to 10;
+	
+	vw3D.SetShowName(vw3D.Objects[i], 0);
+End;
+ 
+// Remove clouds so points aren't distorted
+Earth.Globe.AtmosphereLayer.UseCloudMap = 0;
+
+// Turn off the default status text:
+vw3D.ShowStatusText = 0;
+
+//EndBlock
+
+// Setup options to just show low contrast map in 2D view
+GlobeOptions mapOptions; 
+mapOptions.SurfaceLayer.DaytimeImageFilename = FF_Preferences.FreeFlyerEXEPath + "Images\earth_low_contrast.jpg";
+
+mapOptions.SurfaceLayer.UseBumpMapImage      = 0;
+mapOptions.SurfaceLayer.UseNighttimeImage    = 0;
+mapOptions.SurfaceLayer.UseSpecularMapImage  = 0;
+
+// Create a 2D View
+//Block 2D view
+
+ViewWindow vw2D({const, coveragePointGroup, woWindowFrame});
+If (enableContact == 1);
+	
+	vw2D.AddObject(lvecAntennaToSC);
+	vw2D.AddObject(lvecSCToTerminal);
+	vw2D.AddObject(gsAntenna);
+	vw2D.AddObject(gsTerminal);
+	
+	// Set the GroundStation projection heights:
+	vw2D.SetProjectionHeight(gsAntenna.ObjectId, 50);
+	vw2D.SetProjectionHeight(gsTerminal.ObjectId, 50);
+End;
+
+vw2D.CurrentViewpoint.ViewpointType = "map";
+vw2D.SetCelestialObjectGlobeOptions(Earth.ObjectId, mapOptions);
+vw2D.UseLighting = 1;
+
+// Turn off the default status text:
+vw2D.ShowStatusText = 0;
+
+//EndBlock
+
+// Set tail length for constellation
+If (const.ViewAsGroup == 0);
+	
+	For i=0 to const.Count-1;
+		
+		vw3D.SetTailLength(const[i].DisplayName, 10);
+		vw2D.SetTailLength(const[i].DisplayName, 10);
+	End;
+Else;
+	
+	For i=0 to const.Count-1;
+		
+		const[i].Color = ColorTools.Lime;
+	End;
+End;
+
+// Configure the output workspace:
+OutputLayout.ConfigureOutputPropertiesTab(0, 2);
+OutputLayout.SetWindowFrameVisibility({vw3D.ID, vw2D.ID}, 0);
+OutputLayout.SetWindowSize(vw3D.ID, 1, 1, 1, 0.6);
+OutputLayout.SetWindowSize(vw2D.ID, 1, 1, 1, 0.4);
+OutputLayout.SetWindowPosition(vw3D.ID, 1, 0, 1, 0);
+OutputLayout.SetWindowPosition(vw2D.ID, 1, 0, 1, 0.6);
+OutputLayout.ApplyUpdates();
+
+
+// Set Up FileInterface
+
+If (enableContact == 1);
+	fi.Filename = "..\_Output_Files\"+outputFileName;
+	fi.WriteMode = 1;
+	fi.Open();
+
+	// Write header to file
+	If (regionToLoad == 3);
+		
+		fi.Write("Chain contacts with " + gsAntenna.DisplayName + "; " + gsTerminal.DisplayName +"; and spacecraft: " + @"\n");
+	Else;
+		
+		fi.Write(@"Chain contact between ground sites and spacecraft:\n");
+	End;
+End;
+
+
+// Propagate Constellation and Perform Coverage Analysis
+
+Report @"Propagating constellation for: " + analysisDuration.ToString + " day(s)" to Console;
+Report "Analysis starting at: "+ analysisStartEpoch.ConvertToCalendarDate("Mmm DD YYYY hh:mm:ss") + "...." to Console;
+Report "" to Console;
+
+If (enableContact == 1);
+	
+	If (regionToLoad == 3);
+		
+		Report @"Aggregated chain contact between ground sites (listed below) and spacecraft:\n" +
+			   @"- " + gsAntenna.DisplayName  + @"\n" +
+		       @"- " + gsTerminal.DisplayName + @"\n" to Console;
+	Else;
+		
+		Report @"Aggregated chain contact between ground sites and spacecraft:\n" to Console;
+	End;
+End;
+
+// Propagate constellation for defined analysis time
+While (const[0].ElapsedTime <= TimeSpan.FromDays(analysisDuration));
+	
+	// Perform a coverage analysis for entire constellation	
+	Call PerformCoverageAnalysisForFormation(const, coveragePointGroup, totalNumberOfRevisits, pointHasBeenCovered, scaleFactor);		
+	
+	If (enableContact == 1);
+		
+		// Display chain contact:
+		For i = 0 to const.Count-1;
+
+			// Show contact vectors when there's chain contact between antenna, constellation member, and terminal
+			If (lvcContactEvaluators[i].Visibility(const[i].Epoch) == 1);
+				
+				lvecAntennaToSC[i].Active  = 1;
+				lvecSCToTerminal[i].Active = 1;
+			Else;
+				
+				lvecAntennaToSC[i].Active  = 0;
+				lvecSCToTerminal[i].Active = 0;
+			End;
+
+			// Report contact information to the output file and update overlay
+			aNumEvents[i] = lvcContactEvaluators[i].VisibilityTimes(const[i].Epoch, lEventTimes[i], lEventTypes[i]);
+			
+			For j = 0 to aNumEvents[i]-1;
+				
+				If (lEventTypes[i][j] == 1); // Acquisition of signal
+					
+					woContactOverlay.Shapes[5].TextOptions.Text = lEventTimes[i][j].ConvertToCalendarDate("Mmm DD YYYY hh:mm:ss");
+					woContactOverlay.Shapes[3].TextOptions.Text = const[i].DisplayName;
+					fi.Write("AoS: " + const[i].DisplayName + ", at: " + lEventTimes[i][j].ConvertToCalendarDate("Mmm DD YYYY hh:mm:ss") +@"\n");
+					totalAoS++;
+				Else; // Loss of signal
+					
+					woContactOverlay.Shapes[7].TextOptions.Text = lEventTimes[i][j].ConvertToCalendarDate("Mmm DD YYYY hh:mm:ss");
+					fi.Write("LoS: " + const[i].DisplayName + ", at: " + lEventTimes[i][j].ConvertToCalendarDate("Mmm DD YYYY hh:mm:ss")+@"\n");
+					totalLoS++;
+				End;
+			End;
+		End;
+		
+		// Display aggregated contact info
+		If (stepCount >= chainSummaryTime);
+			
+			// Report total number of AoS and LoS events
+			Report const[0].Epoch.ConvertToCalendarDate("Mmm DD YYYY hh:mm") + ": " + totalAoS.ToString() + " AoS event(s), " + totalLoS.ToString() + " LoS event(s) in " + chainSummaryTimeString to Console;
+			
+			// Reset total AoS and LoS
+			totalAoS = 0;
+			totalLoS = 0;
+			
+			// Reset stepCount
+			stepCount = 0; 
+		End;
+		stepCount++;
+	End;
+	
+	// Update the status overlay with coverage information
+	//    Index 2: Update the Spacecraft Epoch
+	//    Index 5: Update total number of points covered
+	//	  Index 7: Update percentage of points covered
+		
+	woStatusOverlay.Shapes[2].TextOptions.Text = const[0].Epoch.ConvertToCalendarDate("Mmm DD YYYY hh:mm:ss");
+	woStatusOverlay.Shapes[5].TextOptions.Text = pointHasBeenCovered.Sum().ToString() + "/" + coveragePointGroup.NumberOfPoints.ToString();
+	woStatusOverlay.Shapes[7].TextOptions.Text = ((pointHasBeenCovered.Sum()/coveragePointGroup.NumberOfPoints)*100).Format("%3.2f") + "%";
+
+	// Update the output views
+	vw3D.Update();
+	vw2D.Update();
+	
+	// Propagate the Formation:
+	Step const;
+End;
+
+// Close FileInterface
+fi.Close();
