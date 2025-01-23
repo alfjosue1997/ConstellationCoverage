@@ -1,0 +1,76 @@
+
+Define Procedure convertKMLToRegion(String filePath, Array lat, Array long, Region reg, Variable planet);
+	
+	FileInterface FI;
+	Variable i;
+	Variable k;
+	Variable dist;
+	Variable timeStep;
+	StringTokenizer st;
+	StringArray line[0];
+	TimeSpanArray waypointEpochs;
+
+	Variable numWaypoints;
+	
+	If (planet == 0 );
+		reg.SetCentralBody(Earth);
+	ElseIf(planet == 1);
+		reg.SetCentralBody(Moon);
+	End;
+	
+	line.Dimension = 1;
+
+	FI.Filename=filePath;
+	FI.ReadMode = 1;
+	FI.Open();
+	
+	If (FI.IsOpen == 0);
+		Console.CurrentTextColor = ColorTools.Red;
+		Report "You've entered an invalid .kml file path. Edit your file path and re-run your Mission Plan." to Console;
+		Stop;
+	End;
+	
+	st.AddDelimiter(",");
+	st.AddDelimiter(" ");
+
+	lat.Dimension = 0;
+	long.Dimension = 0;
+
+	line[0] = "Foo";
+
+	While (line[0].TrimWhitespace != "<coordinates>");
+		
+		line[0] = FI.GetLine();
+	End;
+
+	st.RemoveDelimiter(" ");
+	st.StringToParse = FI.GetLine();
+	line=st.Tokens;
+	k=0;
+	
+	For i=0 to line.Dimension-1 step 3;
+		
+		long.Dimension++;
+		lat.Dimension++;
+		
+		long[k]=line[i].ToVariable();
+		lat[k]=line[i+1].ToVariable();
+		
+		k++;
+	End;
+	Report lat;
+	Report long;
+	Variable endPointLat  = lat[0];
+	Variable endPointLong = long[0];
+	
+	reg.NumberOfVertices = lat.Dimension;
+	reg.Latitude = lat;
+	reg.Longitude = long;
+	
+	String regName = reg.DisplayName;
+	
+	Put reg to regName+".reg";
+
+	FI.Close();
+
+EndProcedure;
